@@ -1,0 +1,427 @@
+[
+  {
+    "name": "Meesho",
+    "token": "meesho",
+    "ats": "lever"
+  },
+  {
+    "name": "CRED",
+    "token": "cred",
+    "ats": "lever"
+  },
+  {
+    "name": "Zeta",
+    "token": "zeta",
+    "ats": "lever"
+  },
+  {
+    "name": "Fi Money",
+    "token": "epifi",
+    "ats": "lever"
+  },
+  {
+    "name": "Pocket FM",
+    "token": "pocketfm",
+    "ats": "lever"
+  },
+  {
+    "name": "Notion",
+    "token": "notion",
+    "ats": "ashby"
+  },
+  {
+    "name": "Cursor",
+    "token": "cursor",
+    "ats": "ashby"
+  },
+  {
+    "name": "Confluent India",
+    "token": "confluent",
+    "ats": "ashby"
+  },
+  {
+    "name": "Snowflake India",
+    "token": "snowflake",
+    "ats": "ashby"
+  },
+  {
+    "name": "Navi Technologies",
+    "token": "navi",
+    "ats": "ashby"
+  },
+  {
+    "name": "Ramp",
+    "token": "ramp",
+    "ats": "ashby"
+  },
+  {
+    "name": "Perplexity AI",
+    "token": "perplexity",
+    "ats": "ashby"
+  },
+  {
+    "name": "Linear",
+    "token": "linear",
+    "ats": "ashby"
+  },
+  {
+    "name": "Supabase",
+    "token": "supabase",
+    "ats": "ashby"
+  },
+  {
+    "name": "Temporal",
+    "token": "temporal",
+    "ats": "ashby"
+  },
+  {
+    "name": "Zapier",
+    "token": "zapier",
+    "ats": "ashby"
+  },
+  {
+    "name": "PostHog",
+    "token": "posthog",
+    "ats": "ashby"
+  },
+  {
+    "name": "Synthesia",
+    "token": "synthesia",
+    "ats": "ashby"
+  },
+  {
+    "name": "InMobi",
+    "token": "inmobi",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Zscaler India",
+    "token": "zscaler",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Netskope India",
+    "token": "netskope",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Samsara India",
+    "token": "samsara",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Databricks India",
+    "token": "databricks",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Rubrik India",
+    "token": "rubrik",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "PubMatic India",
+    "token": "pubmatic",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "AlphaSense India",
+    "token": "alphasense",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Sonatus India",
+    "token": "sonatus",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Druva India",
+    "token": "druva",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "HighRadius India",
+    "token": "highradius",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Commvault India",
+    "token": "commvault",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "AppsFlyer India",
+    "token": "appsflyer",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "New Relic India",
+    "token": "newrelic",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Tanium India",
+    "token": "tanium",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "PagerDuty",
+    "token": "pagerduty",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Sumo Logic India",
+    "token": "sumologic",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "TripAdvisor India",
+    "token": "tripadvisor",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Thoughtworks",
+    "token": "thoughtworks",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "MongoDB India",
+    "token": "mongodb",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Elastic India",
+    "token": "elastic",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Stripe India",
+    "token": "stripe",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Cloudflare India",
+    "token": "cloudflare",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Twilio India",
+    "token": "twilio",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Deliveroo India",
+    "token": "deliveroo",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Okta India",
+    "token": "okta",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Canonical (Remote India)",
+    "token": "canonical",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "GitLab (Remote India)",
+    "token": "gitlab",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Datadog",
+    "token": "datadog",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Pinterest",
+    "token": "pinterest",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Reddit",
+    "token": "reddit",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Robinhood",
+    "token": "robinhood",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Brex",
+    "token": "brex",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Scale AI",
+    "token": "scaleai",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Flexport",
+    "token": "flexport",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Box",
+    "token": "boxinc",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Gusto",
+    "token": "gusto",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Coursera",
+    "token": "coursera",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "CockroachLabs",
+    "token": "cockroachlabs",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Dremio",
+    "token": "dremio",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Slice India",
+    "token": "slice",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Groww India",
+    "token": "groww",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Porter India",
+    "token": "porter",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Airtable",
+    "token": "airtable",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Figma",
+    "token": "figma",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Roblox",
+    "token": "roblox",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Instacart",
+    "token": "instacart",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Toast",
+    "token": "toast",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Duolingo",
+    "token": "duolingo",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Affirm",
+    "token": "affirm",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Chime",
+    "token": "chime",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Branch",
+    "token": "branchmetrics",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Pure Storage",
+    "token": "purestorage",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Qualtrics",
+    "token": "qualtrics",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "CircleCI",
+    "token": "circleci",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "SiteMinder",
+    "token": "siteminder",
+    "ats": "ashby"
+  },
+  {
+    "name": "Capco",
+    "token": "capco",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Iris Software",
+    "token": "iris",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "ION",
+    "token": "ion",
+    "ats": "lever"
+  },
+  {
+    "name": "Jumio Corporation",
+    "token": "jumio",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Koch",
+    "token": "koch",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Celonis",
+    "token": "celonis",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Fox Corporation",
+    "token": "fox",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Karat",
+    "token": "karat",
+    "ats": "greenhouse"
+  },
+  {
+    "name": "Nium",
+    "token": "nium",
+    "ats": "lever"
+  },
+  {
+    "name": "MetLife",
+    "token": "metlife",
+    "ats": "lever"
+  },
+  {
+    "name": "Galaxy Technologies Services",
+    "token": "galaxy",
+    "ats": "greenhouse"
+  }
+]

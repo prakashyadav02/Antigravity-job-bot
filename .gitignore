@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Environment variables & secrets (CRITICAL: NEVER COMMIT)
+.env
+.env.*
+!.env.example
+
+# Authentication storage states & session cookies
+data/*_storage_state*.json
+data/*storage_state*.json
+*_storage_state*.json
+
+# Personal candidate configurations & resumes
+config/profile.json
+config/screening_details.json
+!config/*.template.json
+data/*.pdf
+*.pdf
+
+# Runtime tracker database & lead data
+data/applied_jobs.json
+data/recruiter_leads.json
+data/recruiter_outreach.json
+data/recruiter_followups.json
+data/naukri_rank_log.json
+data/portal_jobs.json
+data/naukri_full_details*.json
+data/naukri_profile_snapshot.json
+data/*_backup.json
+data/debug/
+data/reports/
+
+# Screenshots, debug artifacts & scratch scripts
+*.png
+*.jpg
+*.jpeg
+*.log
+scratch_*.mjs
+test_otp_fetcher.js
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

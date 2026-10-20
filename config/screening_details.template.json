@@ -1,0 +1,20 @@
+{
+  "fullName": "Your Full Name",
+  "totalExperience": "3+ Years",
+  "relevantExperience": "3+ Years (Python / PySpark / Data Engineering / SQL / Airflow)",
+  "currentCTC": "Competitive",
+  "expectedCTC": "Negotiable",
+  "offerInHand": "No",
+  "currentLocation": "Your City, India",
+  "preferredWorkLocations": "Bengaluru / Pune / Hyderabad / Remote",
+  "currentCompany": "Your Current Employer",
+  "employmentType": "Full-time / Permanent",
+  "payrollCompany": "Direct Payroll",
+  "officialNoticePeriod": "15 Days / Negotiable",
+  "servingNoticePeriod": "No",
+  "lastWorkingDay": "N/A",
+  "contactNumber": "+91-9876543210",
+  "emailAddress": "your.email@example.com",
+  "linkedin": "https://www.linkedin.com/in/your-profile",
+  "github": "https://github.com/your-username"
+}

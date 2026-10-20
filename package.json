@@ -1,0 +1,35 @@
+{
+  "name": "job-automation-bot",
+  "version": "1.0.0",
+  "description": "Autonomous AI-powered job application bot targeting direct ATS portals (Greenhouse, Lever) with zero ban risk.",
+  "type": "module",
+  "main": "src/cli.js",
+  "bin": {
+    "job-bot": "src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "apply": "node src/cli.js apply",
+    "scan": "node src/cli.js scan",
+    "history": "node src/cli.js history"
+  },
+  "dependencies": {
+    "@google/genai": "^2.24.0",
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.5",
+    "imapflow": "^2.0.7",
+    "mailparser": "^3.9.28",
+    "node-cron": "^4.6.0",
+    "nodemailer": "^10.0.11",
+    "playwright": "^1.49.0"
+  },
+  "keywords": [
+    "job-automation",
+    "ats",
+    "greenhouse",
+    "lever",
+    "playwright"
+  ],
+  "author": "",
+  "license": "MIT"
+}

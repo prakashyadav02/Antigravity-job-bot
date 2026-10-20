@@ -1,0 +1,55 @@
+{
+  "personal": {
+    "firstName": "Vivek",
+    "lastName": "Kumar",
+    "email": "your.email@example.com",
+    "phone": "+91 9876543210",
+    "city": "Bengaluru",
+    "state": "Karnataka",
+    "country": "India",
+    "postalCode": "560001",
+    "currentLocation": "Bengaluru, India"
+  },
+  "links": {
+    "linkedin": "https://www.linkedin.com/in/your-profile",
+    "github": "https://github.com/your-username",
+    "portfolio": "https://yourportfolio.dev",
+    "twitter": ""
+  },
+  "documents": {
+    "resumePath": "C:\\path\\to\\your\\resume.pdf",
+    "coverLetterPath": ""
+  },
+  "workPreferences": {
+    "targetRoles": [
+      "Software Engineer",
+      "Full Stack Developer",
+      "Frontend Engineer",
+      "Backend Engineer"
+    ],
+    "targetLocations": [
+      "Remote",
+      "India",
+      "Bengaluru",
+      "Hyderabad"
+    ],
+    "noticePeriodDays": 30,
+    "currentSalary": "",
+    "expectedSalary": "Negotiable",
+    "currency": "INR",
+    "willingToRelocate": "Yes"
+  },
+  "legalAndScreening": {
+    "authorizedToWork": "Yes",
+    "requireSponsorship": "No",
+    "gender": "Decline to Self Identify",
+    "raceOrEthnicity": "Decline to Self Identify",
+    "veteranStatus": "I am not a protected veteran",
+    "disabilityStatus": "No, I do not have a disability"
+  },
+  "customAnswers": {
+    "yearsOfExperience": "3",
+    "primarySkills": "JavaScript, TypeScript, React, Node.js, Python, SQL",
+    "whyJoin": "I am passionate about building scalable, high-impact software and collaborating with innovative teams solving hard problems."
+  }
+}

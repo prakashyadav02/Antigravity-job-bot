@@ -114,7 +114,8 @@ export function generatePersonalizedPitch(lead) {
 }
 
 /**
- * Creates concise, high-converting recruiter email HTML content
+ * Creates concise, high-converting email HTML content tailored specifically
+ * for either Talent Acquisition Specialists or Engineering/Data Hiring Managers
  */
 export function generateRecruiterEmail(lead) {
   const profile = loadProfile();
@@ -132,22 +133,39 @@ export function generateRecruiterEmail(lead) {
 
   const companyName = cleanCompanyName(lead.company);
   
-  let greeting = `Hi ${companyName} Hiring Team,`;
+  let formattedFirst = 'Hiring Team';
   if (lead.recruiterName && !/hiring|recruiter|team|manager/i.test(lead.recruiterName)) {
     const rawFirst = lead.recruiterName.trim().split(' ')[0].toLowerCase();
-    const formattedFirst = rawFirst.charAt(0).toUpperCase() + rawFirst.slice(1);
-    greeting = `Hi ${formattedFirst},`;
+    formattedFirst = rawFirst.charAt(0).toUpperCase() + rawFirst.slice(1);
   }
 
+  const isTA = lead.contactType === 'TALENT_ACQUISITION' || /talent|recruiter|hr|ta|people|staffing/i.test(lead.recruiterTitle || '');
+  const isHiringManager = !isTA && (lead.contactType === 'HIRING_MANAGER' || /manager|lead|director|vp|head|architect/i.test(lead.recruiterTitle || ''));
   const pitch = generatePersonalizedPitch(lead);
-  const subject = `Application for ${lead.title} — ${fullName} (${yoe} Yrs | Python, PySpark, SQL, Airflow)`;
+
+  let subject = '';
+  let greeting = '';
+  let openingParagraph = '';
+  let ctaParagraph = '';
+
+  if (isHiringManager) {
+    subject = `Data Engineering on your team — ${fullName} (${yoe} Yrs | PySpark, Airflow, SQL)`;
+    greeting = `Hi ${formattedFirst},`;
+    openingParagraph = `I came across your profile as an engineering leader at <strong>${companyName}</strong>. Given your team's ongoing data and platform initiatives, I wanted to reach out directly regarding engineering opportunities with your team.`;
+    ctaParagraph = `I have attached my resume for your review. Would you be open to a brief 5-10 minute conversation next week to explore how my data engineering experience can support your team's roadmap?`;
+  } else {
+    subject = `Application for ${lead.title} — ${fullName} (${yoe} Yrs | 15 Days Notice)`;
+    greeting = formattedFirst !== 'Hiring Team' ? `Hi ${formattedFirst},` : `Hi ${companyName} Talent Acquisition Team,`;
+    openingParagraph = `I noticed the opening for <strong>${lead.title}</strong> at <strong>${companyName}</strong> and am writing to express my strong interest in joining your engineering team.`;
+    ctaParagraph = `I have attached my latest resume for your review. I am available to join within a <strong>15-day notice period</strong> and would welcome the opportunity to discuss my qualifications with your team.`;
+  }
 
   const html = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #2d3748; max-width: 620px;">
       <p style="margin-bottom: 14px;">${greeting}</p>
       
       <p style="margin-bottom: 12px;">
-        I noticed the opening for <strong>${lead.title}</strong> at <strong>${companyName}</strong> and am writing to express my strong interest in joining your engineering team.
+        ${openingParagraph}
       </p>
 
       <p style="margin-bottom: 12px;">
@@ -165,7 +183,7 @@ export function generateRecruiterEmail(lead) {
       </ul>
 
       <p style="margin-bottom: 16px;">
-        I have attached my latest resume for your review. I would welcome the opportunity to discuss how my data engineering experience can add immediate value to ${companyName}.
+        ${ctaParagraph}
       </p>
 
       <p style="margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 14px; color: #4a5568;">
@@ -260,9 +278,9 @@ export async function sendColdEmailToRecruiter(lead) {
   };
   saveOutreachRecord(record);
 
-  // Update lead status in recruiter_leads.json
+  // Update lead status in recruiter_leads.json (strictly by lead ID or exact recipient email)
   const leads = getSavedLeads();
-  const target = leads.find(l => l.id === lead.id || l.jobUrl === lead.jobUrl);
+  const target = leads.find(l => l.id === lead.id || (l.targetEmail && l.targetEmail.toLowerCase() === (lead.targetEmail || '').toLowerCase()));
   if (target) {
     target.status = 'CONTACTED';
     target.contactedAt = new Date().toISOString();
@@ -274,17 +292,25 @@ export async function sendColdEmailToRecruiter(lead) {
 
 /**
  * Sends cold emails to a batch of uncontacted leads with safe pacing
+ * Can filter by 'ALL', 'TA' (Talent Acquisition only), or 'HIRING_MANAGER' only.
  */
-export async function sendBatchRecruiterOutreach(maxCount = 10) {
+export async function sendBatchRecruiterOutreach(maxCount = 10, filterType = 'ALL') {
   const leads = getSavedLeads();
-  const uncontacted = leads.filter(l => 
-    l.status === 'UNCONTACTED' && 
-    l.targetEmail && 
-    !isCompanyExcluded(l.company, `${l.domain || ''} ${l.targetEmail}`)
-  );
+  const uncontacted = leads.filter(l => {
+    if (l.status !== 'UNCONTACTED' || !l.targetEmail) return false;
+    if (isCompanyExcluded(l.company, `${l.domain || ''} ${l.targetEmail}`)) return false;
 
-  console.log(`\n📬 [Recruiter Outreach] Starting batch email outreach (Max: ${maxCount})...`);
-  console.log(`Total uncontacted leads available: ${uncontacted.length}`);
+    if (filterType === 'TA') {
+      return l.contactType === 'TALENT_ACQUISITION' || /talent|recruiter|hr|ta|people/i.test(l.recruiterTitle || '');
+    }
+    if (filterType === 'HIRING_MANAGER') {
+      return l.contactType === 'HIRING_MANAGER' || /manager|lead|director|vp|head|architect/i.test(l.recruiterTitle || '');
+    }
+    return true;
+  });
+
+  console.log(`\n📬 [Recruiter Outreach] Starting batch outreach (Max: ${maxCount} | Filter: ${filterType})...`);
+  console.log(`Total uncontacted leads matching filter: ${uncontacted.length}`);
 
   const toSend = uncontacted.slice(0, maxCount);
   const sent = [];

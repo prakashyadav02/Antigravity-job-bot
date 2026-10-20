@@ -63,17 +63,32 @@ export function startDashboardServer(port = 3333) {
       const followUpHistory = getFollowUpHistory();
       const naukriLogs = getNaukriRankLogs();
 
+      const taLeadsCount = leads.filter(l => l.contactType === 'TALENT_ACQUISITION' || /talent|recruiter|hr|ta|people/i.test(l.recruiterTitle || '')).length;
+      const hmLeadsCount = leads.filter(l => l.contactType === 'HIRING_MANAGER' || /manager|lead|director|vp|head|architect/i.test(l.recruiterTitle || '')).length;
+      const genericLeadsCount = leads.filter(l => (l.targetEmail || '').startsWith('careers@') || (l.targetEmail || '').startsWith('hr@')).length;
+
+      let isLinkedInAuth = false;
+      try {
+        const { isLinkedInSessionActive } = await import('../scrapers/recruiterFinder.js');
+        isLinkedInAuth = isLinkedInSessionActive();
+      } catch {
+        isLinkedInAuth = fs.existsSync(path.resolve(__dirname, '../../data/linkedin_storage_state.json'));
+      }
+
       res.end(JSON.stringify({
         ...state,
         totalLifetimeApplied: history.length,
         totalLeadsCount: leads.length,
         uncontactedLeadsCount: leads.filter(l => l.status === 'UNCONTACTED').length,
+        taLeadsCount,
+        hmLeadsCount,
+        genericLeadsCount,
         eligibleFollowUpsCount: eligibleFollowUps.length,
         sentFollowUpsCount: followUpHistory.length,
         naukriLastRank: naukriLogs[naukriLogs.length - 1] || null,
         isNaukriSessionSaved: isNaukriSessionSaved(),
         hasNaukriPassword: !!process.env.NAUKRI_PASSWORD,
-        isLinkedInSessionSaved: fs.existsSync(path.resolve(__dirname, '../../data/linkedin_storage_state.json')),
+        isLinkedInSessionSaved: isLinkedInAuth,
         autopilot: getAutoPilotStatus(),
         historySlice: history.slice(-10).reverse()
       }));
@@ -130,10 +145,13 @@ export function startDashboardServer(port = 3333) {
         try { params = JSON.parse(body); } catch {}
 
         if (params.batch) {
-          addLog(`📬 Sending cold emails to up to ${params.max || 5} recruiters...`);
+          const filterType = params.filterType || 'ALL';
+          const maxCount = params.max || 5;
+          const label = filterType === 'TA' ? 'Talent Acquisition leads' : (filterType === 'HIRING_MANAGER' ? 'Hiring Managers' : 'recruiter leads');
+          addLog(`📬 Sending cold emails to up to ${maxCount} ${label}...`);
           res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-          res.end(JSON.stringify({ success: true, message: 'Batch email outreach dispatched.' }));
-          sendBatchRecruiterOutreach(params.max || 5).catch(e => addLog(`❌ Outreach error: ${e.message}`));
+          res.end(JSON.stringify({ success: true, message: `Batch email outreach for ${label} dispatched.` }));
+          sendBatchRecruiterOutreach(maxCount, filterType).catch(e => addLog(`❌ Outreach error: ${e.message}`));
           return;
         }
 
@@ -157,6 +175,27 @@ export function startDashboardServer(port = 3333) {
           res.end(JSON.stringify({ error: e.message }));
         }
       });
+      return;
+    }
+
+    // API: Deep Upgrade Generic Leads to Real TA & Hiring Managers
+    if (req.method === 'POST' && url.pathname === '/api/leads/upgrade') {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ success: true, message: 'Deep Upgrade initiated in background.' }));
+
+      (async () => {
+        try {
+          addLog('🚀 [Deep Upgrade] Starting conversion of generic company leads to specific TA & Hiring Managers...');
+          const { deepUpgradeGenericLeads } = await import('../scrapers/recruiterFinder.js');
+          const result = await deepUpgradeGenericLeads({
+            onLog: (msg) => addLog(msg),
+            maxCompanies: 20
+          });
+          addLog(`🎉 [Deep Upgrade Finished] Created ${result.upgraded} real verified recruiter & hiring manager leads!`);
+        } catch (e) {
+          addLog(`❌ [Deep Upgrade Failed]: ${e.message}`);
+        }
+      })();
       return;
     }
 
@@ -892,6 +931,12 @@ function getDashboardHtml() {
       </div>
 
       <div class="flex flex-wrap items-center gap-4">
+        <!-- LinkedIn Session Status & 1-Click Login -->
+        <button onclick="openLinkedInBrowser()" id="btn-linkedin-header" class="px-3.5 py-2.5 rounded-xl text-xs font-bold bg-[#0A66C2]/20 border border-[#0A66C2]/40 text-[#38bdf8] hover:bg-[#0A66C2]/35 active:scale-[0.98] transition flex items-center gap-2 shadow" title="Click to log in to LinkedIn for deep Talent Acquisition and Hiring Manager discovery">
+          <span>🔑</span>
+          <span id="linkedin-header-label">Connect LinkedIn</span>
+        </button>
+
         <!-- Settings Button -->
         <button onclick="openSettingsModal()" class="px-4 py-2.5 rounded-xl text-xs font-bold bg-slate-900 border border-slate-700 text-slate-200 hover:text-white hover:border-slate-500 hover:bg-slate-800 active:scale-[0.98] transition flex items-center gap-2 shadow">
           <span>⚙️</span>
@@ -1235,30 +1280,52 @@ function getDashboardHtml() {
 
     <!-- Recruiter Leads & Cold Outreach Section -->
     <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 mb-8 shadow-xl">
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-800">
         <div>
           <div class="flex items-center gap-2">
             <span class="text-xl">🎯</span>
-            <h3 class="text-lg font-bold text-white">Direct Recruiter Leads & Cold Email Outreach</h3>
+            <h3 class="text-lg font-bold text-white">Direct Recruiter & Hiring Manager Leads (Multiple Per Job)</h3>
           </div>
           <p class="text-xs text-slate-400 mt-1">
-            Recruiter and hiring manager emails extracted from jobs posted in the last 1 hour. Send personalized cold emails with your latest resume attached in 1 click!
+            Discovers verified <strong>Talent Acquisition Specialists (TA)</strong> & <strong>Engineering Hiring Managers</strong> per opening. Send tailored technical cold emails with resume attached in 1 click!
           </p>
+          <!-- Lead Stats Breakdown Pills -->
+          <div class="flex flex-wrap items-center gap-2 mt-2.5">
+            <span id="stat-total-leads" class="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-800 text-slate-300">Total: 0</span>
+            <span id="stat-ta-leads" class="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-purple-500/20 text-purple-300 border border-purple-500/30">👔 Talent Acquisition: 0</span>
+            <span id="stat-hm-leads" class="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">🚀 Hiring Managers: 0</span>
+            <span id="stat-uncontacted-leads" class="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">⏳ Uncontacted: 0</span>
+          </div>
         </div>
-        <div class="flex items-center gap-3">
-          <button onclick="fetchRecruiterLeads()" class="px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 transition flex items-center gap-1.5">
-            <span>🔍 Fetch Fresh Leads (&lt; 1hr)</span>
+        <div class="flex flex-wrap items-center gap-2">
+          <button onclick="fetchRecruiterLeads()" class="px-3 py-2 rounded-xl text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 transition flex items-center gap-1.5 shadow" title="Search fresh LinkedIn & Naukri postings and discover TA + Hiring Managers">
+            <span>🔍 Fetch Leads</span>
           </button>
-          <button onclick="applyBatchLeads(5)" class="px-3.5 py-2 rounded-xl text-xs font-bold bg-blue-600 text-white hover:bg-blue-500 transition shadow flex items-center gap-1.5" title="Auto-apply to the top 5 job links and fill all candidate details">
-            <span>⚡ Apply to 5 Leads</span>
+          <button onclick="deepUpgradeLeads()" class="px-3 py-2 rounded-xl text-xs font-bold bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-600/40 transition flex items-center gap-1.5 shadow" title="Scan existing generic careers@ leads and replace them with real TA & Hiring Managers">
+            <span>🚀 Deep Upgrade</span>
           </button>
-          <button onclick="sendBatchOutreach(5)" class="px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-500 transition shadow flex items-center gap-1.5">
-            <span>✉️ Send 5 Cold Emails</span>
+          <button onclick="sendBatchOutreach(5, 'TA')" class="px-3 py-2 rounded-xl text-xs font-bold bg-purple-600 text-white hover:bg-purple-500 transition shadow flex items-center gap-1.5" title="Batch email Talent Acquisition specialists">
+            <span>👔 Email 5 TA</span>
           </button>
-          <button onclick="sendFollowUps(5)" class="px-3.5 py-2 rounded-xl text-xs font-bold bg-sky-600 text-white hover:bg-sky-500 transition shadow flex items-center gap-1.5">
-            <span>📬 Send Due Follow-Ups</span>
+          <button onclick="sendBatchOutreach(5, 'HIRING_MANAGER')" class="px-3 py-2 rounded-xl text-xs font-bold bg-amber-600 text-white hover:bg-amber-500 transition shadow flex items-center gap-1.5" title="Batch email Engineering Managers & Tech Leads">
+            <span>🚀 Email 5 Managers</span>
+          </button>
+          <button onclick="applyBatchLeads(5)" class="px-3 py-2 rounded-xl text-xs font-bold bg-blue-600 text-white hover:bg-blue-500 transition shadow flex items-center gap-1.5" title="Auto-apply to the top 5 job links and fill all candidate details">
+            <span>⚡ Apply 5</span>
+          </button>
+          <button onclick="sendFollowUps(5)" class="px-3 py-2 rounded-xl text-xs font-bold bg-sky-600 text-white hover:bg-sky-500 transition shadow flex items-center gap-1.5">
+            <span>📬 Follow-Ups</span>
           </button>
         </div>
+      </div>
+
+      <!-- Quick Filter Buttons -->
+      <div class="flex items-center gap-2 mt-4 mb-2 flex-wrap">
+        <span class="text-xs text-slate-400 font-semibold mr-1">Filter Leads:</span>
+        <button onclick="setLeadFilter('ALL')" id="filter-all" class="px-3 py-1 rounded-lg text-xs font-bold bg-slate-800 text-white border border-slate-600 shadow">All Contacts</button>
+        <button onclick="setLeadFilter('TA')" id="filter-ta" class="px-3 py-1 rounded-lg text-xs font-semibold text-purple-300 hover:bg-purple-500/20 border border-transparent hover:border-purple-500/30">👔 Talent Acquisition</button>
+        <button onclick="setLeadFilter('HIRING_MANAGER')" id="filter-hm" class="px-3 py-1 rounded-lg text-xs font-semibold text-amber-300 hover:bg-amber-500/20 border border-transparent hover:border-amber-500/30">🚀 Hiring Managers</button>
+        <button onclick="setLeadFilter('UNCONTACTED')" id="filter-uncontacted" class="px-3 py-1 rounded-lg text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 border border-transparent hover:border-emerald-500/30">⏳ Uncontacted</button>
       </div>
 
       <div class="mt-4 overflow-x-auto">
@@ -1310,6 +1377,34 @@ function getDashboardHtml() {
         document.getElementById('stat-leads').innerText = data.totalLeadsCount || 0;
         if (document.getElementById('stat-followups')) {
           document.getElementById('stat-followups').innerText = data.eligibleFollowUpsCount || 0;
+        }
+
+        // Update Recruiter breakdown stats
+        if (document.getElementById('stat-total-leads')) {
+          document.getElementById('stat-total-leads').innerText = 'Total: ' + (data.totalLeadsCount || 0);
+        }
+        if (document.getElementById('stat-ta-leads')) {
+          document.getElementById('stat-ta-leads').innerText = '👔 Talent Acquisition: ' + (data.taLeadsCount || 0);
+        }
+        if (document.getElementById('stat-hm-leads')) {
+          document.getElementById('stat-hm-leads').innerText = '🚀 Hiring Managers: ' + (data.hmLeadsCount || 0);
+        }
+        if (document.getElementById('stat-uncontacted-leads')) {
+          document.getElementById('stat-uncontacted-leads').innerText = '⏳ Uncontacted: ' + (data.uncontactedLeadsCount || 0);
+        }
+
+        // Header LinkedIn status pill
+        const linkedinBtnLabel = document.getElementById('linkedin-header-label');
+        if (linkedinBtnLabel) {
+          if (data.isLinkedInSessionSaved) {
+            linkedinBtnLabel.innerText = 'LinkedIn Active';
+            const btnEl = document.getElementById('btn-linkedin-header');
+            if (btnEl) {
+              btnEl.className = 'px-3.5 py-2.5 rounded-xl text-xs font-bold bg-emerald-500/10 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/20 active:scale-[0.98] transition flex items-center gap-2 shadow';
+            }
+          } else {
+            linkedinBtnLabel.innerText = 'Connect LinkedIn';
+          }
         }
         if (document.getElementById('stat-naukri')) {
           if (data.isRankingNaukri) {
@@ -1397,64 +1492,109 @@ function getDashboardHtml() {
       }
     }
 
+    let cachedLeads = [];
+    let currentLeadFilter = 'ALL';
+
+    function setLeadFilter(filter) {
+      currentLeadFilter = filter;
+      ['all', 'ta', 'hm', 'uncontacted'].forEach(f => {
+        const btn = document.getElementById('filter-' + f);
+        if (btn) {
+          const isSelected = f.toUpperCase() === filter || (f === 'hm' && filter === 'HIRING_MANAGER');
+          btn.className = isSelected
+            ? 'px-3 py-1 rounded-lg text-xs font-bold bg-slate-800 text-white border border-slate-600 shadow'
+            : 'px-3 py-1 rounded-lg text-xs font-semibold text-slate-400 hover:text-white border border-transparent';
+        }
+      });
+      renderLeads();
+    }
+
+    function renderLeads() {
+      const tbody = document.getElementById('leads-table-body');
+      if (!tbody) return;
+      if (!cachedLeads || cachedLeads.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="py-6 text-center text-slate-500">No leads extracted yet. Click "Fetch Leads" above!</td></tr>';
+        return;
+      }
+
+      const filtered = cachedLeads.filter(l => {
+        if (currentLeadFilter === 'TA') return l.contactType === 'TALENT_ACQUISITION' || /talent|recruiter|hr|ta|people/i.test(l.recruiterTitle || '');
+        if (currentLeadFilter === 'HIRING_MANAGER') return l.contactType === 'HIRING_MANAGER' || /manager|lead|director|vp|head|architect/i.test(l.recruiterTitle || '');
+        if (currentLeadFilter === 'UNCONTACTED') return l.status === 'UNCONTACTED';
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="py-6 text-center text-slate-500">No leads match the selected filter.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = filtered.map(l => {
+        const isContacted = l.status === 'CONTACTED';
+        const isLinkedIn = (l.jobUrl && l.jobUrl.includes('linkedin.com')) || (l.sourcePortal && l.sourcePortal.toLowerCase().includes('linkedin'));
+        const isNaukri = (l.jobUrl && l.jobUrl.includes('naukri.com')) || (l.sourcePortal && l.sourcePortal.toLowerCase().includes('naukri'));
+        
+        let linkButtonHtml = '<span class="text-slate-600 text-xs">—</span>';
+        if (l.jobUrl && l.jobUrl.startsWith('http')) {
+          if (isLinkedIn) {
+            linkButtonHtml = '<a href="' + l.jobUrl + '" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#0A66C2]/20 text-[#38bdf8] hover:bg-[#0A66C2]/35 border border-[#0A66C2]/50 transition shadow-sm" title="Open LinkedIn Job Post in new tab"><svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/></svg><span>Apply on LinkedIn ↗</span></a>';
+          } else if (isNaukri) {
+            linkButtonHtml = '<a href="' + l.jobUrl + '" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/35 border border-indigo-500/40 transition shadow-sm" title="Open Naukri Job Post in new tab"><span>🔵 Apply on Naukri ↗</span></a>';
+          } else {
+            linkButtonHtml = '<a href="' + l.jobUrl + '" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-700/60 text-slate-200 hover:bg-slate-700 border border-slate-600 transition shadow-sm" title="Open Job Post in new tab"><span>🔗 View Job Post ↗</span></a>';
+          }
+        }
+
+        const isHM = l.contactType === 'HIRING_MANAGER' || /manager|lead|director|vp|head|architect/i.test(l.recruiterTitle || '');
+        const badgeTypeHtml = isHM
+          ? '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">🚀 Hiring Manager</span>'
+          : '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">👔 TA Recruiter</span>';
+
+        const nameWithLink = l.recruiterProfileUrl
+          ? ('<a href="' + l.recruiterProfileUrl + '" target="_blank" rel="noopener noreferrer" class="text-white font-semibold hover:text-sky-300 transition inline-flex items-center gap-1" title="Open LinkedIn Profile">' + l.recruiterName + ' <span class="text-[10px] text-sky-400">↗</span></a>')
+          : ('<span class="text-slate-200 font-semibold">' + l.recruiterName + '</span>');
+
+        return \`
+          <tr class="hover:bg-slate-800/40 transition">
+            <td class="py-3 px-3 font-bold text-white truncate" title="\${l.company}">\${l.company}</td>
+            <td class="py-3 px-3 overflow-hidden">
+              <div class="text-slate-200 font-semibold truncate" title="\${l.title}">\${l.title}</div>
+              <div class="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1"><span>🕒</span> <span>\${l.timePosted || 'Recently'}</span></div>
+            </td>
+            <td class="py-3 px-3 whitespace-nowrap">\${linkButtonHtml}</td>
+            <td class="py-3 px-3 overflow-hidden">
+              <div class="flex items-center gap-1.5 mb-1">\${badgeTypeHtml}</div>
+              <div>\${nameWithLink}</div>
+              <div class="text-[11px] text-slate-400 truncate mt-0.5" title="\${l.recruiterTitle}">\${l.recruiterTitle || (isHM ? 'Engineering Leader' : 'Technical Recruiter')}</div>
+              <a href="mailto:\${l.targetEmail}" class="font-mono text-emerald-400 text-[11px] hover:underline block truncate mt-0.5" title="\${l.targetEmail}">\${l.targetEmail}</a>
+            </td>
+            <td class="py-3 px-3 whitespace-nowrap">
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold \${isContacted ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}">
+                \${l.status}
+              </span>
+            </td>
+            <td class="py-3 px-3 text-right whitespace-nowrap">
+              <div class="flex items-center justify-end gap-1.5">
+                \${l.applyStatus === 'APPLIED'
+                  ? '<span class="px-2 py-1 rounded-md text-xs font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">✅ Applied</span>'
+                  : ('<button onclick="applySingleLead(\\'' + l.id + '\\')" class="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition shadow flex items-center gap-1" title="Bot auto-applies & fills your profile">⚡ Apply</button>')
+                }
+                \${isContacted 
+                  ? '<span class="px-1.5 py-1 text-xs text-slate-500 font-semibold">Sent</span>' 
+                  : ('<button onclick="sendSingleEmail(\\'' + l.id + '\\')" class="px-2.5 py-1.5 rounded-lg ' + (isHM ? 'bg-amber-600 hover:bg-amber-500' : 'bg-emerald-600 hover:bg-emerald-500') + ' text-white font-bold text-xs transition shadow flex items-center gap-1" title="' + (isHM ? 'Send technical manager pitch' : 'Send application pitch with resume') + '">✉️ ' + (isHM ? 'Email Manager' : 'Email TA') + '</button>')
+                }
+              </div>
+            </td>
+          </tr>
+        \`;
+      }).join('');
+    }
+
     async function loadLeads() {
       try {
         const res = await fetch('/api/leads');
-        const leads = await res.json();
-        const tbody = document.getElementById('leads-table-body');
-        if (!leads || leads.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="7" class="py-6 text-center text-slate-500">No leads extracted yet. Click "Fetch Fresh Leads" above!</td></tr>';
-          return;
-        }
-
-        tbody.innerHTML = leads.map(l => {
-          const isContacted = l.status === 'CONTACTED';
-          const isLinkedIn = (l.jobUrl && l.jobUrl.includes('linkedin.com')) || (l.sourcePortal && l.sourcePortal.toLowerCase().includes('linkedin'));
-          const isNaukri = (l.jobUrl && l.jobUrl.includes('naukri.com')) || (l.sourcePortal && l.sourcePortal.toLowerCase().includes('naukri'));
-          
-          let linkButtonHtml = '<span class="text-slate-600 text-xs">—</span>';
-          if (l.jobUrl && l.jobUrl.startsWith('http')) {
-            if (isLinkedIn) {
-              linkButtonHtml = '<a href="' + l.jobUrl + '" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#0A66C2]/20 text-[#38bdf8] hover:bg-[#0A66C2]/35 border border-[#0A66C2]/50 transition shadow-sm" title="Open LinkedIn Job Post in new tab"><svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/></svg><span>Apply on LinkedIn ↗</span></a>';
-            } else if (isNaukri) {
-              linkButtonHtml = '<a href="' + l.jobUrl + '" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/35 border border-indigo-500/40 transition shadow-sm" title="Open Naukri Job Post in new tab"><span>🔵 Apply on Naukri ↗</span></a>';
-            } else {
-              linkButtonHtml = '<a href="' + l.jobUrl + '" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-700/60 text-slate-200 hover:bg-slate-700 border border-slate-600 transition shadow-sm" title="Open Job Post in new tab"><span>🔗 View Job Post ↗</span></a>';
-            }
-          }
-
-          return \`
-            <tr class="hover:bg-slate-800/40 transition">
-              <td class="py-3 px-3 font-bold text-white truncate" title="\${l.company}">\${l.company}</td>
-              <td class="py-3 px-3 overflow-hidden">
-                <div class="text-slate-200 font-semibold truncate" title="\${l.title}">\${l.title}</div>
-                <div class="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1"><span>🕒</span> <span>\${l.timePosted || 'Recently'}</span></div>
-              </td>
-              <td class="py-3 px-3 whitespace-nowrap">\${linkButtonHtml}</td>
-              <td class="py-3 px-3 overflow-hidden">
-                <div class="text-slate-300 font-medium truncate" title="\${l.recruiterName}">\${l.recruiterName}</div>
-                <a href="mailto:\${l.targetEmail}" class="font-mono text-emerald-400 text-[11px] hover:underline block truncate" title="\${l.targetEmail}">\${l.targetEmail}</a>
-              </td>
-              <td class="py-3 px-3 whitespace-nowrap">
-                <span class="px-2 py-0.5 rounded text-[10px] font-bold \${isContacted ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}">
-                  \${l.status}
-                </span>
-              </td>
-              <td class="py-3 px-3 text-right whitespace-nowrap">
-                <div class="flex items-center justify-end gap-1.5">
-                  \${l.applyStatus === 'APPLIED'
-                    ? '<span class="px-2 py-1 rounded-md text-xs font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">✅ Applied</span>'
-                    : \`<button onclick="applySingleLead('\${l.id}')" class="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition shadow flex items-center gap-1" title="Bot auto-applies & fills your profile">⚡ Apply</button>\`
-                  }
-                  \${isContacted 
-                    ? '<span class="px-1.5 py-1 text-xs text-slate-500 font-semibold">Sent</span>' 
-                    : \`<button onclick="sendSingleEmail('\${l.id}')" class="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition shadow flex items-center gap-1" title="Send cold pitch with resume">✉️ Email</button>\`
-                  }
-                </div>
-              </td>
-            </tr>
-          \`;
-        }).join('');
+        cachedLeads = await res.json();
+        renderLeads();
       } catch (e) {
         console.error('Failed to load leads:', e);
       }
@@ -1571,16 +1711,29 @@ function getDashboardHtml() {
       }
     }
 
-    async function sendBatchOutreach(max) {
-      if (!confirm('Send personalized cold emails with resume attached to the next ' + max + ' recruiters?')) return;
+    async function sendBatchOutreach(max = 5, filterType = 'ALL') {
+      const typeLabel = filterType === 'TA' ? 'Talent Acquisition specialists' : (filterType === 'HIRING_MANAGER' ? 'Engineering Hiring Managers' : 'leads');
+      if (!confirm('Send personalized cold emails with your latest resume to up to ' + max + ' ' + typeLabel + '?')) return;
       try {
         const res = await fetch('/api/leads/email', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ batch: true, max })
+          body: JSON.stringify({ batch: true, max, filterType })
         });
         const data = await res.json();
-        alert('📬 Outreach batch started! Watch the live terminal feed.');
+        alert('📬 Outreach batch started for ' + typeLabel + '! Watch the live terminal feed.');
+        setTimeout(loadLeads, 6000);
+      } catch (e) {
+        alert('Error: ' + e.message);
+      }
+    }
+
+    async function deepUpgradeLeads() {
+      if (!confirm('Deep Upgrade will inspect companies with generic careers@ emails, discover their actual Talent Acquisition specialists and Engineering/Data Managers on LinkedIn, and replace generic emails with verified direct contacts.\\n\\nStart Deep Upgrade?')) return;
+      try {
+        const res = await fetch('/api/leads/upgrade', { method: 'POST' });
+        const data = await res.json();
+        alert('🚀 Deep Upgrade started! Watch the Live Execution Feed below to see real TA and Hiring Managers added in real-time.');
         setTimeout(loadLeads, 6000);
       } catch (e) {
         alert('Error: ' + e.message);

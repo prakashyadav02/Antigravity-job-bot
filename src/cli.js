@@ -504,16 +504,32 @@ program
     }
   });
 
-// Command 13: Send Personalized Cold Emails to Discovered Recruiters
+// Command 13: Send Personalized Cold Emails to Discovered Recruiters & Hiring Managers
 program
   .command('send-recruiter-emails')
-  .description('Send personalized cold application emails with latest resume attached to uncontacted recruiters')
+  .description('Send personalized cold application emails with latest resume attached to uncontacted recruiters or hiring managers')
   .option('--max <number>', 'Maximum emails to dispatch', '5')
+  .option('--type <type>', 'Filter contact type: all, ta, hm', 'all')
   .action(async (options) => {
     try {
-      await sendBatchRecruiterOutreach(parseInt(options.max, 10));
+      const filterType = options.type.toLowerCase() === 'ta' ? 'TA' : (options.type.toLowerCase() === 'hm' ? 'HIRING_MANAGER' : 'ALL');
+      await sendBatchRecruiterOutreach(parseInt(options.max, 10), filterType);
     } catch (err) {
       console.error('Send recruiter emails error:', err.message);
+    }
+  });
+
+// Command: Deep Upgrade Generic Leads to Real TA & Hiring Managers
+program
+  .command('upgrade-leads')
+  .description('Deep upgrade: scans saved generic careers@ leads and discovers verified Talent Acquisition & Hiring Managers')
+  .option('--max <number>', 'Maximum companies to probe', '15')
+  .action(async (options) => {
+    try {
+      const { deepUpgradeGenericLeads } = await import('./scrapers/recruiterFinder.js');
+      await deepUpgradeGenericLeads({ maxCompanies: parseInt(options.max, 10) });
+    } catch (err) {
+      console.error('Upgrade leads error:', err.message);
     }
   });
 

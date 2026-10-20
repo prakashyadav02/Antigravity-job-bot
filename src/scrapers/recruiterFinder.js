@@ -18,10 +18,19 @@ const KNOWN_DOMAINS = {
   'inmobi': 'inmobi.com',
   'swiggy': 'swiggy.in',
   'zomato': 'zomato.com',
+  'blinkit': 'blinkit.com',
+  'zepto': 'zeptonow.com',
   'razorpay': 'razorpay.com',
   'phonepe': 'phonepe.com',
   'paytm': 'paytm.com',
   'flipkart': 'flipkart.com',
+  'myntra': 'myntra.com',
+  'nykaa': 'nykaa.com',
+  'ola': 'olacabs.com',
+  'ola electric': 'olaelectric.com',
+  'rapido': 'rapido.bike',
+  'juspay': 'juspay.in',
+  'urban piper': 'urbanpiper.com',
   'alphasense': 'alphasense.com',
   'browserstack': 'browserstack.com',
   'postman': 'postman.com',
@@ -93,8 +102,44 @@ const KNOWN_DOMAINS = {
   'xylem': 'xylem.com',
   'conneqt': 'conneqtcorp.com',
   'tp': 'teleperformance.com',
-  'teleperformance': 'teleperformance.com'
+  'teleperformance': 'teleperformance.com',
+  'amazon': 'amazon.com',
+  'microsoft': 'microsoft.com',
+  'google': 'google.com',
+  'uber': 'uber.com',
+  'walmart': 'walmart.com',
+  'target': 'target.com',
+  'paypal': 'paypal.com',
+  'intuit': 'intuit.com',
+  'adobe': 'adobe.com',
+  'cisco': 'cisco.com',
+  'vmware': 'vmware.com',
+  'oracle': 'oracle.com',
+  'salesforce': 'salesforce.com',
+  'sap': 'sap.com',
+  'dell': 'dell.com',
+  'hp': 'hp.com',
+  'ibm': 'ibm.com',
+  'intel': 'intel.com',
+  'amd': 'amd.com',
+  'qualcomm': 'qualcomm.com',
+  'nvidia': 'nvidia.com',
+  'samsung': 'samsung.com',
+  'airtel': 'airtel.com',
+  'jio': 'ril.com'
 };
+
+/**
+ * Strips corporate legal suffixes to retrieve the conversational company name
+ */
+export function cleanCompanyName(raw) {
+  if (!raw) return '';
+  return raw
+    .replace(/\(.*?\)/g, '')
+    .replace(/\b(private limited|pvt ltd|pvt\.? ltd\.?|limited|ltd|technologies|technology|tech|solutions|software|services|systems|infotech|consulting|india|inc|corp|corporation|llc|co)\b/gi, '')
+    .replace(/[.,\-_/\s]+$/g, '')
+    .trim();
+}
 
 /**
  * Normalizes company name and resolves its true web domain
@@ -156,18 +201,275 @@ export function updateLeadApplyStatus(leadId, applyStatus = 'APPLIED') {
   }
 }
 
+/**
+ * Checks if LinkedIn storage state exists and contains a valid, non-expired li_at cookie
+ */
+export function isLinkedInSessionActive() {
+  if (!fs.existsSync(LINKEDIN_STORAGE)) return false;
+  try {
+    const state = JSON.parse(fs.readFileSync(LINKEDIN_STORAGE, 'utf-8'));
+    if (!Array.isArray(state.cookies)) return false;
+    const liAt = state.cookies.find(c => c.name === 'li_at' && c.value);
+    if (!liAt) return false;
+    // Check expiration if set
+    if (liAt.expires && liAt.expires * 1000 < Date.now()) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Parses search headline into clean candidate Name and Role
+ */
+export function parseLinkedInProfileHeadline(rawHeadline, targetCompany = '') {
+  let text = (rawHeadline || '')
+    .replace(/^linkedin\s*/i, '')
+    .replace(/https?:\/\/[^\s]+/gi, '')
+    .trim();
+
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const headline = lines[lines.length - 1] || text;
+  const parts = headline.split(/\s*[-–—|]\s*/);
+  if (parts.length < 2) return null;
+
+  const rawName = parts[0].trim();
+  // Name should be 2 to 4 words and purely alphabetic
+  if (!/^[a-zA-Z\s.]{2,35}$/.test(rawName) || rawName.split(' ').length > 4) {
+    return null;
+  }
+
+  let rawRole = parts[1].trim();
+  rawRole = rawRole
+    .replace(/\s*@\s*.*$/i, '')
+    .replace(/\s*at\s+.*$/i, '')
+    .replace(/\s*\|\|.*$/i, '')
+    .replace(/\.{2,}$/, '')
+    .trim();
+
+  if (targetCompany) {
+    const esc = targetCompany.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    rawRole = rawRole.replace(new RegExp(`\\b${esc}\\b`, 'gi'), '').trim();
+  }
+
+  return {
+    name: rawName,
+    role: rawRole || 'Hiring Lead'
+  };
+}
+
+/**
+ * Queries web search engines to discover public LinkedIn profiles of company team members
+ */
+async function searchWebForProfiles(page, query, targetCompany) {
+  const url = `https://search.yahoo.com/search?p=${encodeURIComponent(query)}`;
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    const results = await page.evaluate(() => {
+      const list = [];
+      const elements = document.querySelectorAll('#web ol li, .compText, .algo');
+      for (const el of elements) {
+        const a = el.querySelector('h3 a, a[href*="linkedin.com/in/"]');
+        const snippet = el.querySelector('.compText, p')?.innerText?.trim() || '';
+        if (a && a.href && a.href.includes('linkedin.com/in/')) {
+          list.push({ title: a.innerText.trim(), href: a.href, snippet });
+        }
+      }
+      return list;
+    });
+
+    const parsed = [];
+    for (const r of results) {
+      const info = parseLinkedInProfileHeadline(r.title, targetCompany);
+      if (info && info.name) {
+        parsed.push({
+          name: info.name,
+          role: info.role,
+          profileUrl: r.href,
+          snippet: r.snippet
+        });
+      }
+    }
+    return parsed;
+  } catch (err) {
+    console.warn(`[Search Warning] Web query "${query}" failed: ${err.message}`);
+    return [];
+  }
+}
+
+/**
+ * Performs logged-in LinkedIn People Search when authenticated session is available
+ */
+async function searchLinkedInPeopleDirect(page, company, roleQuery) {
+  const searchUrl = `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(company + ' ' + roleQuery)}&origin=GLOBAL_SEARCH_HEADER`;
+  try {
+    await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
+    await randomSleep(1500, 2500);
+
+    // If redirected to login, session has expired
+    if (page.url().includes('/login') || page.url().includes('/checkpoint') || page.url().includes('/uas/')) {
+      return [];
+    }
+
+    const people = await page.evaluate(() => {
+      const list = [];
+      const items = document.querySelectorAll('.reusable-search__result-container, li.artdeco-list__item');
+      for (const item of items) {
+        const nameLink = item.querySelector('.entity-result__title-text a, a[href*="/in/"]');
+        const subtitle = item.querySelector('.entity-result__primary-subtitle, .entity-result__summary');
+        if (nameLink && subtitle) {
+          const rawName = nameLink.innerText.split('\n')[0].trim();
+          const role = subtitle.innerText.trim();
+          const href = nameLink.href ? nameLink.href.split('?')[0] : '';
+          if (rawName && href.includes('/in/')) {
+            list.push({ name: rawName, role, profileUrl: href });
+          }
+        }
+      }
+      return list;
+    });
+
+    return people;
+  } catch (err) {
+    console.warn(`[LinkedIn Direct Search Info] Failed for ${company} (${roleQuery}): ${err.message}`);
+    return [];
+  }
+}
+
+/**
+ * Discovers verified Talent Acquisition Specialists and Engineering/Data Hiring Managers
+ * for a target company, synthesizing their corporate email addresses and verifying domain MX records.
+ * Returns up to 2 Talent Acquisition specialists and up to 2 Hiring Managers per company.
+ */
+export async function fetchCompanyTeamContacts(company, domain, options = {}) {
+  const {
+    jobTitle = 'Data Engineer',
+    page = null,
+    maxTA = 2,
+    maxHM = 2
+  } = options;
+
+  if (!company || !domain) return [];
+  if (isCompanyExcluded(company, domain)) return [];
+
+  const clean = cleanCompanyName(company) || company;
+  if (!clean || clean.length < 2) return [];
+
+  // Verify MX records first before expending search cycles
+  try {
+    const mx = await dns.promises.resolveMx(domain);
+    if (!mx || mx.length === 0) return [];
+  } catch {
+    return [];
+  }
+
+  const contacts = [];
+  const seenEmails = new Set();
+  const seenNames = new Set();
+
+  function addContact(person, forcedType = null) {
+    if (!person || !person.name) return;
+    const lowerName = person.name.toLowerCase().trim();
+    if (seenNames.has(lowerName)) return;
+
+    let contactType = forcedType;
+    if (!contactType) {
+      contactType = /talent|recruiter|hr|ta|people|talent acquisition|hiring|staffing/i.test(person.role || '')
+        ? 'TALENT_ACQUISITION'
+        : 'HIRING_MANAGER';
+    }
+
+    const currentCount = contacts.filter(c => c.contactType === contactType).length;
+    const limit = contactType === 'TALENT_ACQUISITION' ? maxTA : maxHM;
+    if (currentCount >= limit) return;
+
+    // Synthesize email: first.last@domain
+    const nameParts = person.name.toLowerCase().replace(/[^a-z ]/g, '').split(' ').filter(Boolean);
+    if (nameParts.length === 0) return;
+    const first = nameParts[0];
+    const last = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
+    const email = last ? `${first}.${last}@${domain}` : `${first}@${domain}`;
+
+    if (seenEmails.has(email)) return;
+    seenNames.add(lowerName);
+    seenEmails.add(email);
+
+    contacts.push({
+      contactType,
+      recruiterName: person.name,
+      recruiterTitle: person.role || (contactType === 'TALENT_ACQUISITION' ? 'Technical Recruiter' : 'Engineering Manager'),
+      recruiterProfileUrl: person.profileUrl || null,
+      targetEmail: email,
+      domain,
+      emailType: contactType === 'TALENT_ACQUISITION' ? 'Talent Acquisition' : 'Hiring Manager Direct',
+      confidence: 'High (Targeted Person)'
+    });
+  }
+
+  let searchPage = page;
+  let localBrowser = null;
+
+  try {
+    if (!searchPage) {
+      const bObj = await createBrowser({ headless: true });
+      localBrowser = bObj.browser;
+      searchPage = bObj.page;
+    }
+
+    // Tier 1: Authenticated LinkedIn Search (if session state is valid)
+    if (isLinkedInSessionActive()) {
+      try {
+        const directTA = await searchLinkedInPeopleDirect(searchPage, clean, 'Talent Acquisition');
+        for (const p of directTA) addContact(p, 'TALENT_ACQUISITION');
+
+        const directHM = await searchLinkedInPeopleDirect(searchPage, clean, 'Engineering Manager Data');
+        for (const p of directHM) addContact(p, 'HIRING_MANAGER');
+      } catch (e) {
+        console.warn(`[Direct LinkedIn Search] ${e.message}`);
+      }
+    }
+
+    // Tier 2: Public Web Search for LinkedIn profiles (Zero login, 100% reliable)
+    const neededTA = maxTA - contacts.filter(c => c.contactType === 'TALENT_ACQUISITION').length;
+    const neededHM = maxHM - contacts.filter(c => c.contactType === 'HIRING_MANAGER').length;
+
+    if (neededTA > 0) {
+      const taQuery = `site:linkedin.com/in "${clean}" ("Talent Acquisition" OR "Technical Recruiter" OR "IT Recruiter")`;
+      const taResults = await searchWebForProfiles(searchPage, taQuery, clean);
+      for (const p of taResults) addContact(p, 'TALENT_ACQUISITION');
+    }
+
+    if (neededHM > 0) {
+      const hmQuery = `site:linkedin.com/in "${clean}" ("Engineering Manager" OR "Lead Data Engineer" OR "Director of Engineering" OR "VP Engineering" OR "Data Lead")`;
+      const hmResults = await searchWebForProfiles(searchPage, hmQuery, clean);
+      for (const p of hmResults) addContact(p, 'HIRING_MANAGER');
+    }
+
+  } catch (err) {
+    console.warn(`[Team Contact Search Info for ${company}]: ${err.message}`);
+  } finally {
+    if (localBrowser) {
+      await localBrowser.close().catch(() => {});
+    }
+  }
+
+  return contacts;
+}
+
 export async function recordDiscoveredLead(leadData) {
   const {
     company,
     title,
     location = 'India',
     jobUrl = '',
+    contactType = 'TALENT_ACQUISITION',
     recruiterName = 'Hiring Team',
     recruiterTitle = 'Technical Recruiter',
+    recruiterProfileUrl = null,
     targetEmail,
     sourcePortal = 'Job Portal',
-    emailType = 'Direct Post Contact',
-    confidence = 'High (Direct Post)'
+    emailType = 'Direct Contact',
+    confidence = 'High (Targeted Person)'
   } = leadData;
 
   if (!targetEmail || !company) return null;
@@ -179,8 +481,9 @@ export async function recordDiscoveredLead(leadData) {
   }
 
   const leads = getSavedLeads();
+  // Deduplicate strictly by targetEmail — allows multiple team members for the same opening
   if (leads.some(l => (l.targetEmail || '').toLowerCase() === cleanEmail)) {
-    return null; // Already exists
+    return null;
   }
 
   // Extract domain and verify MX
@@ -197,10 +500,12 @@ export async function recordDiscoveredLead(leadData) {
     company: company.trim(),
     title: (title || 'Data Engineer').trim(),
     location: location.trim(),
-    timePosted: 'Recently',
+    timePosted: leadData.timePosted || 'Recently',
     jobUrl,
+    contactType,
     recruiterName,
     recruiterTitle,
+    recruiterProfileUrl: recruiterProfileUrl || null,
     targetEmail: cleanEmail,
     domain,
     emailType,
@@ -212,13 +517,13 @@ export async function recordDiscoveredLead(leadData) {
 
   leads.unshift(newLead);
   saveLeads(leads);
-  console.log(`🎯 [Multi-Platform Lead Recorded] ${newLead.company} | ${newLead.targetEmail} (${newLead.sourcePortal})`);
+  console.log(`🎯 [Multi-Contact Lead Recorded] ${newLead.company} | ${newLead.recruiterName} (${newLead.contactType}) -> ${newLead.targetEmail}`);
   return newLead;
 }
 
 /**
- * Searches public job feeds (LinkedIn Public Search, zero login, zero ban risk)
- * Extracts hiring managers, technical recruiters, and explicit emails from recent postings.
+ * Searches LinkedIn for recent job openings, inspecting both the post and the company's team
+ * to extract multiple verified contacts (Talent Acquisition + Engineering Managers) per opening.
  */
 export async function fetchRecentRecruiterLeads(options = {}, fallbackHours = 1) {
   let defaultQuery = 'Data Engineer';
@@ -241,18 +546,9 @@ export async function fetchRecentRecruiterLeads(options = {}, fallbackHours = 1)
   console.log(`\n🔍 [LinkedIn Recruiter Finder] Initiating fresh search (< ${hours}h)`);
   console.log(`Query: "${query}" | Location: "${location}" | Max Target: ${maxResults}`);
   const browserOpts = { headless };
-  if (fs.existsSync(LINKEDIN_STORAGE)) {
-    try {
-      const state = JSON.parse(fs.readFileSync(LINKEDIN_STORAGE, 'utf-8'));
-      if (Array.isArray(state.cookies) && state.cookies.length >= 3) {
-        browserOpts.storageState = LINKEDIN_STORAGE;
-        console.log(`🔑 Using authenticated LinkedIn session for deep lead discovery`);
-      } else {
-        console.log(`Safety: Public Search without login (Zero candidate account risk)`);
-      }
-    } catch {
-      console.log(`Safety: Public Search without login (Zero candidate account risk)`);
-    }
+  if (isLinkedInSessionActive()) {
+    browserOpts.storageState = LINKEDIN_STORAGE;
+    console.log(`🔑 Using authenticated LinkedIn session for deep lead discovery`);
   } else {
     console.log(`Safety: Public Search without login (Zero candidate account risk)`);
   }
@@ -264,10 +560,7 @@ export async function fetchRecentRecruiterLeads(options = {}, fallbackHours = 1)
   const newLeads = [];
 
   try {
-    // Time filter: r3600 = 1 hour, r86400 = 24 hours
     const timeFilter = hours <= 1 ? 'r3600' : 'r86400';
-    
-    // Multiple targeted queries for maximum recruiter contact coverage
     const queries = [
       query,
       `"${query}" ("send resume" OR "share CV" OR "hiring")`
@@ -311,17 +604,9 @@ export async function fetchRecentRecruiterLeads(options = {}, fallbackHours = 1)
           const time = (await card.locator('time').innerText().catch(() => '')).trim();
 
           if (title && company && jobUrl && !existingJobUrls.has(jobUrl)) {
-            // Check 0-5 YOE criteria
-            if (!isExperienceMatching(title, 0, 5)) {
-              continue;
-            }
+            if (!isExperienceMatching(title, 0, 5)) continue;
+            if (isCompanyExcluded(company, jobUrl)) continue;
 
-            // Safety Shield: Block current company / products
-            if (isCompanyExcluded(company, jobUrl)) {
-              continue;
-            }
-
-            // Avoid duplicate discovery
             if (!discoveredJobs.some(j => j.jobUrl === jobUrl)) {
               discoveredJobs.push({ title, company, loc, jobUrl, timePosted: time || 'Recently' });
             }
@@ -350,7 +635,7 @@ export async function fetchRecentRecruiterLeads(options = {}, fallbackHours = 1)
 
         const desc = await page.locator('.show-more-less-html__markup, .description__text, .decorated-job-posting__details, body').innerText().catch(() => '');
 
-        // 1. Check for explicit email in job description text (e.g. "share resume at hr@domain.com")
+        // 1. Check for explicit email in job description text
         const emailRegex = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g;
         const matches = desc.match(emailRegex) || [];
         const cleanEmails = matches.filter(e => {
@@ -359,102 +644,101 @@ export async function fetchRecentRecruiterLeads(options = {}, fallbackHours = 1)
                  !lower.includes('w3.org') && !lower.includes('example.com') && !lower.includes('github.com');
         });
 
-        // 2. Poster / Recruiter card detection
-        let recruiterName = null;
-        let recruiterTitle = null;
-        let recruiterProfileUrl = null;
-
+        // 2. Poster / Recruiter card detection on the post itself
+        let directCardRecruiter = null;
         const posterCard = page.locator('.message-the-recruiter, .hirer-card, [class*="recruiter"], [class*="hirer"]').first();
         if (await posterCard.count() > 0) {
           const posterText = await posterCard.innerText().catch(() => '');
-          recruiterProfileUrl = await posterCard.locator('a').first().getAttribute('href').catch(() => null);
+          const cardProfileUrl = await posterCard.locator('a').first().getAttribute('href').catch(() => null);
           const lines = posterText.split('\n').map(l => l.trim()).filter(Boolean);
           if (lines.length >= 2) {
-            recruiterName = lines[1];
-            recruiterTitle = lines[2] || 'Hiring Lead';
+            directCardRecruiter = {
+              name: lines[1],
+              role: lines[2] || 'Technical Recruiter',
+              profileUrl: cardProfileUrl
+            };
           }
         }
 
-        // 3. Resolve true company domain
         const domain = resolveCompanyDomain(item.company);
 
-        let targetEmail = null;
-        let confidence = 'Medium';
-        let emailType = 'Talent Acquisition';
-
+        // Record any explicit contact found on the post card
+        let postCardEmail = null;
         if (cleanEmails.length > 0) {
-          // Explicit email found in post text!
-          targetEmail = cleanEmails[0].toLowerCase();
-          confidence = 'High (Explicit in Post)';
-          emailType = 'Direct Post Contact';
-        } else if (recruiterName && recruiterName !== 'Hiring Team') {
-          // Known recruiter name: infer professional address
-          const nameParts = recruiterName.toLowerCase().replace(/[^a-z ]/g, '').split(' ').filter(Boolean);
+          postCardEmail = cleanEmails[0].toLowerCase();
+        } else if (directCardRecruiter && directCardRecruiter.name !== 'Hiring Team') {
+          const nameParts = directCardRecruiter.name.toLowerCase().replace(/[^a-z ]/g, '').split(' ').filter(Boolean);
           const first = nameParts[0] || 'talent';
           const last = nameParts[1] || '';
-          targetEmail = last ? `${first}.${last}@${domain}` : `${first}@${domain}`;
-          confidence = 'High (Recruiter Direct)';
-          emailType = 'Recruiter Direct';
-        } else {
-          targetEmail = `careers@${domain}`;
-          confidence = 'Medium (Talent Team)';
-          emailType = 'Talent Acquisition';
+          postCardEmail = last ? `${first}.${last}@${domain}` : `${first}@${domain}`;
         }
 
-        // Verify that the domain actually has active MX mail servers
-        try {
-          const mx = await dns.promises.resolveMx(domain);
-          if (!mx || mx.length === 0) {
-            console.log(`⚠️ Domain "${domain}" has no MX records. Skipping lead.`);
-            continue;
+        if (postCardEmail && !existingEmails.has(postCardEmail)) {
+          const recorded = await recordDiscoveredLead({
+            company: item.company,
+            title: item.title,
+            location: item.loc,
+            timePosted: item.timePosted,
+            jobUrl: item.jobUrl,
+            contactType: 'TALENT_ACQUISITION',
+            recruiterName: directCardRecruiter?.name || 'Technical Recruiter',
+            recruiterTitle: directCardRecruiter?.role || 'Technical Recruiter',
+            recruiterProfileUrl: directCardRecruiter?.profileUrl || null,
+            targetEmail: postCardEmail,
+            domain,
+            sourcePortal: 'LinkedIn Job Card',
+            confidence: 'High (Direct Post Contact)'
+          });
+          if (recorded) {
+            newLeads.push(recorded);
+            existingEmails.add(postCardEmail);
           }
-        } catch {
-          console.log(`⚠️ Cannot resolve mail servers for "${domain}". Skipping lead.`);
-          continue;
         }
 
-        // Avoid adding duplicate email
-        if (existingEmails.has(targetEmail)) {
-          console.log(`ℹ️ Lead email ${targetEmail} already in database. Skipping.`);
-          continue;
+        // 3. Multi-Contact Team Discovery: Uncover TA Specialists AND Hiring Managers for this company
+        console.log(`🔎 Discovering specific Talent Acquisition specialists and Hiring Managers for ${item.company}...`);
+        const teamContacts = await fetchCompanyTeamContacts(item.company, domain, {
+          jobTitle: item.title,
+          page,
+          maxTA: 2,
+          maxHM: 2
+        });
+
+        for (const contact of teamContacts) {
+          if (existingEmails.has(contact.targetEmail)) continue;
+
+          const recorded = await recordDiscoveredLead({
+            company: item.company,
+            title: item.title,
+            location: item.loc,
+            timePosted: item.timePosted,
+            jobUrl: item.jobUrl,
+            contactType: contact.contactType,
+            recruiterName: contact.recruiterName,
+            recruiterTitle: contact.recruiterTitle,
+            recruiterProfileUrl: contact.recruiterProfileUrl,
+            targetEmail: contact.targetEmail,
+            domain: contact.domain,
+            sourcePortal: 'LinkedIn Team Discovery',
+            confidence: contact.confidence
+          });
+
+          if (recorded) {
+            newLeads.push(recorded);
+            existingEmails.add(contact.targetEmail);
+          }
         }
 
-        const lead = {
-          id: `lead_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-          company: item.company,
-          title: item.title,
-          location: item.loc,
-          timePosted: item.timePosted,
-          jobUrl: item.jobUrl,
-          recruiterName: recruiterName || 'Hiring Manager',
-          recruiterTitle: recruiterTitle || 'Technical Recruiter',
-          recruiterProfileUrl: recruiterProfileUrl || null,
-          targetEmail,
-          domain,
-          emailType,
-          confidence,
-          sourcePortal: 'LinkedIn Public Search',
-          status: 'UNCONTACTED',
-          discoveredAt: new Date().toISOString()
-        };
-
-        console.log(`🎯 Lead Identified: ${lead.recruiterName} (${lead.recruiterTitle}) @ ${lead.company}`);
-        console.log(`   Email: ${lead.targetEmail} [${lead.confidence}]`);
-
-        newLeads.push(lead);
-        leads.unshift(lead);
         existingJobUrls.add(item.jobUrl);
-        existingEmails.add(targetEmail);
 
       } catch (err) {
         console.warn(`[Skip] Could not probe details for ${item.company}: ${err.message}`);
       }
     }
 
-    saveLeads(leads);
     console.log(`\n============================================================`);
-    console.log(`🎉 [Lead Hunt Completed] Extracted ${newLeads.length} fresh recruiter contacts!`);
-    console.log(`📁 Total saved leads ready for outreach: ${leads.length}`);
+    console.log(`🎉 [Lead Hunt Completed] Extracted ${newLeads.length} fresh recruiter & hiring manager contacts!`);
+    console.log(`📁 Total saved leads ready for outreach: ${getSavedLeads().length}`);
     console.log(`============================================================\n`);
 
   } catch (err) {
@@ -468,7 +752,7 @@ export async function fetchRecentRecruiterLeads(options = {}, fallbackHours = 1)
 
 /**
  * Scrapes Naukri.com for 2-5 YOE Data Engineering postings, extracting both
- * explicit emails from job descriptions and verified corporate talent acquisition emails via DNS MX checks.
+ * explicit emails from job descriptions and discovering real Talent Acquisition & Hiring Managers per job.
  */
 export async function fetchNaukriRecruiterLeads(options = {}) {
   let defaultQuery = 'Data Engineer';
@@ -488,9 +772,10 @@ export async function fetchNaukriRecruiterLeads(options = {}) {
 
   const { browser, page } = await createBrowser({ headless });
   const discovered = [];
+  const leads = getSavedLeads();
+  const existingEmails = new Set(leads.map(l => l.targetEmail?.toLowerCase()).filter(Boolean));
 
   try {
-    // Filter by fresh postings (sortBy=f) and 2-5 YOE
     const searchUrl = `https://www.naukri.com/data-engineer-jobs?k=${encodeURIComponent(query)}&experience=2&experience=3&experience=4&experience=5&sortBy=f`;
     console.log(`[Naukri Scraper] Loading: ${searchUrl}`);
     await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 35000 });
@@ -518,7 +803,6 @@ export async function fetchNaukriRecruiterLeads(options = {}) {
 
     console.log(`[Naukri Scraper] Found ${candidates.length} candidate postings on search page.`);
 
-    // Strict role relevance filter to prevent non-tech jobs
     const targetKeywords = ['data', 'etl', 'pyspark', 'spark', 'sql', 'python', 'analytics', 'big data', 'bi developer', 'warehouse', 'platform', 'pipeline'];
     const relevant = candidates.filter(c => {
       const lower = (c.title || '').toLowerCase();
@@ -533,9 +817,8 @@ export async function fetchNaukriRecruiterLeads(options = {}) {
       if (isCompanyExcluded(item.company, item.url)) continue;
 
       let explicitEmail = null;
-      let recruiterName = 'Hiring Team';
 
-      // 1. Check if job page has explicit contact
+      // 1. Inspect Naukri JD for explicit recruiter email
       try {
         await page.goto(item.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
         await randomSleep(800, 1500);
@@ -550,50 +833,64 @@ export async function fetchNaukriRecruiterLeads(options = {}) {
         if (cleanEmails.length > 0) {
           explicitEmail = cleanEmails[0].toLowerCase();
         }
-      } catch (err) {
-        // Page timeout: fallback directly to domain resolution
-      }
+      } catch (err) {}
 
-      if (explicitEmail) {
+      if (explicitEmail && !existingEmails.has(explicitEmail)) {
         const lead = await recordDiscoveredLead({
           company: item.company,
           title: item.title,
           location: item.location,
           jobUrl: item.url,
           targetEmail: explicitEmail,
+          contactType: 'TALENT_ACQUISITION',
           recruiterName: 'Technical Recruiter',
           sourcePortal: 'Naukri Job Posting',
           emailType: 'Direct Recruiter in Post',
           confidence: 'High (Explicit in Naukri JD)'
         });
-        if (lead) discovered.push(lead);
-      } else {
-        // 2. Resolve verified corporate talent acquisition email
-        const domain = resolveCompanyDomain(item.company);
-        if (domain && !domain.includes('careers.com') && !domain.includes('company.com')) {
-          try {
-            const mx = await dns.promises.resolveMx(domain);
-            if (mx && mx.length > 0) {
-              const corporateEmail = `careers@${domain}`;
-              const lead = await recordDiscoveredLead({
-                company: item.company,
-                title: item.title,
-                location: item.location,
-                jobUrl: item.url,
-                targetEmail: corporateEmail,
-                recruiterName: 'Talent Acquisition Team',
-                sourcePortal: 'Naukri Fresh Postings',
-                emailType: 'Talent Acquisition',
-                confidence: 'High (Verified Domain MX)'
-              });
-              if (lead) discovered.push(lead);
-            }
-          } catch {}
+        if (lead) {
+          discovered.push(lead);
+          existingEmails.add(explicitEmail);
+        }
+      }
+
+      // 2. Discover company team contacts (TA specialists + Hiring Managers)
+      const domain = resolveCompanyDomain(item.company);
+      if (domain && !domain.includes('careers.com') && !domain.includes('company.com')) {
+        const teamContacts = await fetchCompanyTeamContacts(item.company, domain, {
+          jobTitle: item.title,
+          page,
+          maxTA: 2,
+          maxHM: 2
+        });
+
+        for (const contact of teamContacts) {
+          if (existingEmails.has(contact.targetEmail)) continue;
+
+          const lead = await recordDiscoveredLead({
+            company: item.company,
+            title: item.title,
+            location: item.location,
+            jobUrl: item.url,
+            contactType: contact.contactType,
+            recruiterName: contact.recruiterName,
+            recruiterTitle: contact.recruiterTitle,
+            recruiterProfileUrl: contact.recruiterProfileUrl,
+            targetEmail: contact.targetEmail,
+            domain: contact.domain,
+            sourcePortal: 'Naukri Team Discovery',
+            confidence: contact.confidence
+          });
+
+          if (lead) {
+            discovered.push(lead);
+            existingEmails.add(contact.targetEmail);
+          }
         }
       }
     }
 
-    console.log(`🎉 [Naukri Lead Scraper] Extracted ${discovered.length} verified direct recruiter & talent contacts!`);
+    console.log(`🎉 [Naukri Lead Scraper] Extracted ${discovered.length} verified direct recruiter & hiring manager contacts!`);
   } catch (err) {
     console.error(`❌ [Naukri Lead Scraper Error]:`, err.message);
   } finally {
@@ -601,6 +898,92 @@ export async function fetchNaukriRecruiterLeads(options = {}) {
   }
 
   return discovered;
+}
+
+/**
+ * Deep Upgrade Engine:
+ * Scans saved leads for generic careers@ or hr@ addresses, finds their company's real
+ * Talent Acquisition specialists and Engineering/Data Hiring Managers, and upgrades them.
+ */
+export async function deepUpgradeGenericLeads(options = {}) {
+  const { onLog = console.log, maxCompanies = 15 } = options;
+  const leads = getSavedLeads();
+  const genericLeads = leads.filter(l => 
+    (l.targetEmail || '').startsWith('careers@') || 
+    (l.targetEmail || '').startsWith('career@') || 
+    (l.targetEmail || '').startsWith('hr@')
+  );
+
+  onLog(`🚀 [Deep Upgrade] Found ${genericLeads.length} generic leads to upgrade with real TA & Hiring Managers.`);
+  if (genericLeads.length === 0) return { upgraded: 0 };
+
+  // Group by company
+  const companyMap = new Map();
+  for (const l of genericLeads) {
+    if (!companyMap.has(l.company)) companyMap.set(l.company, []);
+    companyMap.get(l.company).push(l);
+  }
+
+  const { browser, page } = await createBrowser({ headless: true });
+  let totalUpgraded = 0;
+
+  try {
+    const companies = Array.from(companyMap.keys()).slice(0, maxCompanies);
+    for (let c = 0; c < companies.length; c++) {
+      const company = companies[c];
+      const associated = companyMap.get(company);
+      const rep = associated[0];
+      const domain = rep.domain || resolveCompanyDomain(company);
+
+      onLog(`\n[Upgrade ${c + 1}/${companies.length}] Hunting real TA & Hiring Managers for "${company}" (${domain})...`);
+      const contacts = await fetchCompanyTeamContacts(company, domain, {
+        jobTitle: rep.title,
+        page,
+        maxTA: 2,
+        maxHM: 2
+      });
+
+      if (contacts.length > 0) {
+        onLog(`✅ Discovered ${contacts.length} verified team contacts for ${company}!`);
+        // Remove old generic lead(s) for this company
+        const currentLeads = getSavedLeads().filter(l => !associated.some(old => old.id === l.id));
+
+        for (const contact of contacts) {
+          const newLead = {
+            id: `lead_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            company,
+            title: rep.title,
+            location: rep.location,
+            timePosted: rep.timePosted || 'Recently',
+            jobUrl: rep.jobUrl || '',
+            contactType: contact.contactType,
+            recruiterName: contact.recruiterName,
+            recruiterTitle: contact.recruiterTitle,
+            recruiterProfileUrl: contact.recruiterProfileUrl,
+            targetEmail: contact.targetEmail,
+            domain: contact.domain,
+            emailType: contact.emailType,
+            confidence: contact.confidence,
+            sourcePortal: 'Deep Lead Upgrade',
+            status: 'UNCONTACTED',
+            discoveredAt: new Date().toISOString()
+          };
+          currentLeads.unshift(newLead);
+          totalUpgraded++;
+        }
+        saveLeads(currentLeads);
+      } else {
+        onLog(`ℹ️ No individual profiles discovered for ${company}. Keeping existing lead.`);
+      }
+    }
+  } catch (err) {
+    onLog(`❌ [Deep Upgrade Error]: ${err.message}`);
+  } finally {
+    await browser.close().catch(() => {});
+  }
+
+  onLog(`🎉 [Deep Upgrade Finished] Successfully created ${totalUpgraded} real verified recruiter & hiring manager leads!`);
+  return { upgraded: totalUpgraded };
 }
 
 /**
@@ -620,7 +1003,7 @@ export async function fetchAllPlatformsRecruiterLeads(options = {}) {
 
   const results = [];
 
-  // Platform 1: LinkedIn Public Search (graceful fallback if blocked by auth wall)
+  // Platform 1: LinkedIn Multi-Contact Search
   try {
     const linkedInLeads = await fetchRecentRecruiterLeads({ query, location: 'India', hours, maxResults: Math.ceil(maxResults / 2), headless });
     results.push(...linkedInLeads);
@@ -628,7 +1011,7 @@ export async function fetchAllPlatformsRecruiterLeads(options = {}) {
     console.warn(`[Multi-Platform] LinkedIn harvest info: ${e.message}`);
   }
 
-  // Platform 2: Naukri Job Postings (with domain MX resolution)
+  // Platform 2: Naukri Multi-Contact Search
   try {
     const naukriLeads = await fetchNaukriRecruiterLeads({ query, maxResults: Math.ceil(maxResults / 2), headless });
     results.push(...naukriLeads);

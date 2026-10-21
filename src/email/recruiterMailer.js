@@ -47,6 +47,54 @@ export function cleanCompanyName(raw) {
 }
 
 /**
+ * Extracts Requisition / Job ID from URL or lead object across LinkedIn, Naukri, Workday, Lever, Greenhouse
+ */
+export function extractJobId(jobUrl, lead = {}) {
+  if (lead && lead.jobId) return String(lead.jobId).trim();
+  if (!jobUrl) return null;
+
+  try {
+    const urlObj = new URL(jobUrl);
+    for (const key of ['jobId', 'currentJobId', 'gh_jid', 'id', 'reqId', 'job_id', 'ref', 'requisitionId']) {
+      const val = urlObj.searchParams.get(key);
+      if (val && /^[a-zA-Z0-9\-_]{4,}$/.test(val)) return val;
+    }
+  } catch {}
+
+  // LinkedIn job ID: /jobs/view/(.*-)?(\d{8,12})/
+  const liMatch = jobUrl.match(/\/jobs\/view\/(?:[^\/]+-)?(\d{8,12})/i);
+  if (liMatch) return liMatch[1];
+
+  // Naukri job ID: trailing digits in job-listings (e.g. 180926016268)
+  const naukriMatch = jobUrl.match(/job-listings-.*?-(\d{8,14})(?:\?|$)/i);
+  if (naukriMatch) return naukriMatch[1];
+
+  // Workday requisition ID: (R-\d+|JR\d+|REQ-\d+) preceded by _, -, /, or word boundary
+  const reqMatch = jobUrl.match(/(?:[_\-\/]|\b)(R[-_]?\d{4,8}|JR\d{4,8}|REQ[-_]?\d{4,8})\b/i);
+  if (reqMatch) return reqMatch[1];
+
+  // General trailing path number (digits 5-14)
+  const generalNum = jobUrl.match(/\/(\d{5,14})(?:\/|\?|$)/);
+  if (generalNum) return generalNum[1];
+
+  // UUID match (e.g. Lever/Ashby)
+  const uuidMatch = jobUrl.match(/\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?:\/|\?|$)/);
+  if (uuidMatch) return uuidMatch[1];
+
+  return null;
+}
+
+/**
+ * Checks whether an email is a generic company mailbox (careers@, jobs@, hr@, etc.)
+ * versus an individual professional (Aishwarya Shetty, Ishaan Kakkar, etc.)
+ */
+export function isGenericCareerEmail(email) {
+  if (!email) return false;
+  const local = email.split('@')[0].toLowerCase().trim();
+  return /^(careers?|jobs?|recruitment|talent|hr|info|contact|apply|hiring)$/i.test(local);
+}
+
+/**
  * Analyzes lead context to identify domain and technical focus
  */
 export function detectDomainFocus(lead) {
@@ -132,33 +180,66 @@ export function generateRecruiterEmail(lead) {
   const github = profile.links?.github || '';
 
   const companyName = cleanCompanyName(lead.company);
-  
+  const jobId = extractJobId(lead.jobUrl, lead);
+  const isPerson = !isGenericCareerEmail(lead.targetEmail);
+  const isTA = lead.contactType === 'TALENT_ACQUISITION' || /talent|recruiter|hr|ta|people|staffing/i.test(lead.recruiterTitle || '');
+  const isHiringManager = !isTA && (lead.contactType === 'HIRING_MANAGER' || /manager|lead|director|vp|head|architect/i.test(lead.recruiterTitle || ''));
+  const pitch = generatePersonalizedPitch(lead);
+
   let formattedFirst = 'Hiring Team';
   if (lead.recruiterName && !/hiring|recruiter|team|manager/i.test(lead.recruiterName)) {
     const rawFirst = lead.recruiterName.trim().split(' ')[0].toLowerCase();
     formattedFirst = rawFirst.charAt(0).toUpperCase() + rawFirst.slice(1);
   }
 
-  const isTA = lead.contactType === 'TALENT_ACQUISITION' || /talent|recruiter|hr|ta|people|staffing/i.test(lead.recruiterTitle || '');
-  const isHiringManager = !isTA && (lead.contactType === 'HIRING_MANAGER' || /manager|lead|director|vp|head|architect/i.test(lead.recruiterTitle || ''));
-  const pitch = generatePersonalizedPitch(lead);
+  const jobLinkHtml = lead.jobUrl 
+    ? `<a href="${lead.jobUrl}" target="_blank" rel="noopener noreferrer" style="color: #2b6cb0; text-decoration: underline;"><strong>${lead.title}</strong></a>` 
+    : `<strong>${lead.title}</strong>`;
+  const jobIdMention = jobId ? ` (Job ID / Req #${jobId})` : '';
 
   let subject = '';
   let greeting = '';
   let openingParagraph = '';
-  let ctaParagraph = '';
+  let referralCtaParagraph = '';
 
-  if (isHiringManager) {
-    subject = `Data Engineering on your team — ${fullName} (${yoe} Yrs | PySpark, Airflow, SQL)`;
+  if (isHiringManager && isPerson) {
+    subject = `Data Engineering on your team${jobId ? ` [Req #${jobId}]` : ''} — ${fullName} (${yoe} Yrs | PySpark, Airflow, SQL)`;
     greeting = `Hi ${formattedFirst},`;
-    openingParagraph = `I came across your profile as an engineering leader at <strong>${companyName}</strong>. Given your team's ongoing data and platform initiatives, I wanted to reach out directly regarding engineering opportunities with your team.`;
-    ctaParagraph = `I have attached my resume for your review. Would you be open to a brief 5-10 minute conversation next week to explore how my data engineering experience can support your team's roadmap?`;
-  } else {
-    subject = `Application for ${lead.title} — ${fullName} (${yoe} Yrs | 15 Days Notice)`;
+    openingParagraph = `I came across your profile as an engineering leader at <strong>${companyName}</strong>. I noticed the open position for ${jobLinkHtml}${jobIdMention} and wanted to reach out directly regarding engineering opportunities with your team.`;
+    referralCtaParagraph = `
+      <p style="margin-bottom: 16px;">
+        I have attached my latest resume for your review. If you are directly leading this opening, I would welcome the opportunity to connect for a brief 5-10 minute conversation next week. <strong>If this position is hired by another engineering manager or team at ${companyName}, could you please share my resume with the suitable contact or consider referring me internally for this opening?</strong>
+      </p>
+    `;
+  } else if (isPerson) {
+    // Human TA Recruiter or HR Specialist
+    subject = `Application for ${lead.title}${jobId ? ` [Req #${jobId}]` : ''} — ${fullName} (${yoe} Yrs | 15 Days Notice)`;
     greeting = formattedFirst !== 'Hiring Team' ? `Hi ${formattedFirst},` : `Hi ${companyName} Talent Acquisition Team,`;
-    openingParagraph = `I noticed the opening for <strong>${lead.title}</strong> at <strong>${companyName}</strong> and am writing to express my strong interest in joining your engineering team.`;
-    ctaParagraph = `I have attached my latest resume for your review. I am available to join within a <strong>15-day notice period</strong> and would welcome the opportunity to discuss my qualifications with your team.`;
+    openingParagraph = `I noticed the open position for ${jobLinkHtml}${jobIdMention} at <strong>${companyName}</strong> and am writing to express my strong interest in joining your engineering team.`;
+    referralCtaParagraph = `
+      <p style="margin-bottom: 16px;">
+        I have attached my latest resume for your review and am available to join within a <strong>15-day notice period</strong>. If you are the recruiter leading this search, I would welcome the opportunity to discuss my fit for the role. <strong>If this opening is managed by another recruiter or engineering hiring manager on your team, could you please share my resume with the suitable contact or consider referring me for this position?</strong>
+      </p>
+    `;
+  } else {
+    // Generic corporate career inbox (careers@, jobs@, hr@)
+    subject = `Application for ${lead.title}${jobId ? ` [Req #${jobId}]` : ''} — ${fullName} (${yoe} Yrs | 15 Days Notice)`;
+    greeting = `Hi ${companyName} Talent Acquisition Team,`;
+    openingParagraph = `Please find attached my application for the <strong>${lead.title}</strong> position at <strong>${companyName}</strong>.`;
+    referralCtaParagraph = `
+      <p style="margin-bottom: 16px;">
+        I have attached my latest resume for your review. I am readily available to join within a <strong>15-day notice period</strong> and would welcome the opportunity to discuss how my data engineering experience can add immediate value to ${companyName}.
+      </p>
+    `;
   }
+
+  const jobReferenceBox = (lead.jobUrl || jobId) ? `
+    <div style="background-color: #f7fafc; border-left: 3px solid #3182ce; padding: 10px 14px; margin: 14px 0; border-radius: 4px; font-size: 13px; line-height: 1.5;">
+      <div><strong>Target Role:</strong> ${lead.jobUrl ? `<a href="${lead.jobUrl}" target="_blank" rel="noopener noreferrer" style="color: #2b6cb0; text-decoration: underline;"><strong>${lead.title}</strong></a>` : `<strong>${lead.title}</strong>`}</div>
+      ${jobId ? `<div style="margin-top: 3px;"><strong>Job / Requisition ID:</strong> <span style="font-family: monospace; color: #2d3748; background-color: #edf2f7; padding: 1px 5px; border-radius: 3px;">${jobId}</span></div>` : ''}
+      ${lead.jobUrl ? `<div style="margin-top: 3px;"><strong>Job Posting Link:</strong> <a href="${lead.jobUrl}" target="_blank" rel="noopener noreferrer" style="color: #2b6cb0; word-break: break-all; text-decoration: underline;">${lead.jobUrl}</a></div>` : ''}
+    </div>
+  ` : '';
 
   const html = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #2d3748; max-width: 620px;">
@@ -167,6 +248,8 @@ export function generateRecruiterEmail(lead) {
       <p style="margin-bottom: 12px;">
         ${openingParagraph}
       </p>
+
+      ${jobReferenceBox}
 
       <p style="margin-bottom: 12px;">
         I am a <strong>${title} with ${yoe} years of experience</strong> engineering scalable batch & streaming ETL pipelines, distributed processing workflows, and cloud data lakes using <strong>Python, SQL, PySpark, Apache Spark, Databricks, Airflow, and AWS S3</strong>.
@@ -182,9 +265,7 @@ export function generateRecruiterEmail(lead) {
         <li style="margin-bottom: 4px;">${pitch.bullet2}</li>
       </ul>
 
-      <p style="margin-bottom: 16px;">
-        ${ctaParagraph}
-      </p>
+      ${referralCtaParagraph}
 
       <p style="margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 14px; color: #4a5568;">
         Best regards,<br>
@@ -273,6 +354,9 @@ export async function sendColdEmailToRecruiter(lead) {
     title: lead.title,
     recipientEmail: lead.targetEmail,
     recruiterName: lead.recruiterName,
+    jobUrl: lead.jobUrl || '',
+    jobId: extractJobId(lead.jobUrl, lead) || '',
+    contactType: lead.contactType || '',
     sentAt: new Date().toISOString(),
     messageId: info.messageId
   };

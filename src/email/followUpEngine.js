@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import 'dotenv/config';
-import { getOutreachHistory, cleanCompanyName } from './recruiterMailer.js';
+import { getOutreachHistory, cleanCompanyName, extractJobId, isGenericCareerEmail } from './recruiterMailer.js';
 import { randomSleep } from '../automation/browser.js';
 import { isCompanyExcluded, loadProfile } from '../config.js';
 
@@ -108,7 +108,15 @@ export function generateFollowUpEmail(outreach) {
     greeting = `Hi ${formattedFirst},`;
   }
 
-  const subject = `Re: [${noticeDays} Days Notice] Application for ${outreach.title} — ${fullName}`;
+  const isPerson = !isGenericCareerEmail(outreach.recipientEmail);
+  const jobId = outreach.jobId || extractJobId(outreach.jobUrl, outreach);
+  const jobLink = outreach.jobUrl;
+  const jobLinkHtml = jobLink 
+    ? `<a href="${jobLink}" target="_blank" rel="noopener noreferrer" style="color: #2b6cb0; text-decoration: underline;"><strong>${outreach.title}</strong></a>` 
+    : `<strong>${outreach.title}</strong>`;
+  const jobIdText = jobId ? ` (Job ID / Req #${jobId})` : '';
+
+  const subject = `Re: [${noticeDays} Days Notice] Application for ${outreach.title}${jobId ? ` [Req #${jobId}]` : ''} — ${fullName}`;
 
   const html = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #2d3748; max-width: 650px;">
@@ -119,8 +127,16 @@ export function generateFollowUpEmail(outreach) {
       </p>
 
       <p>
-        I wanted to briefly follow up on my previous note regarding the <strong>${outreach.title}</strong> role at <strong>${companyName}</strong>. I remain very enthusiastic about the work your engineering team is doing and would welcome the opportunity to connect.
+        I wanted to briefly follow up on my previous note regarding the ${jobLinkHtml}${jobIdText} role at <strong>${companyName}</strong>. I remain very enthusiastic about the work your engineering team is doing and would welcome the opportunity to connect.
       </p>
+
+      ${jobLink || jobId ? `
+        <div style="background-color: #f7fafc; border-left: 3px solid #3182ce; padding: 10px 14px; margin: 12px 0; border-radius: 4px; font-size: 13px; line-height: 1.5;">
+          <div><strong>Position:</strong> ${jobLinkHtml}</div>
+          ${jobId ? `<div style="margin-top: 3px;"><strong>Job / Requisition ID:</strong> <span style="font-family: monospace; color: #2d3748; background-color: #edf2f7; padding: 1px 5px; border-radius: 3px;">${jobId}</span></div>` : ''}
+          ${jobLink ? `<div style="margin-top: 3px;"><strong>Job Link:</strong> <a href="${jobLink}" target="_blank" rel="noopener noreferrer" style="color: #2b6cb0; word-break: break-all; text-decoration: underline;">${jobLink}</a></div>` : ''}
+        </div>
+      ` : ''}
 
       <p>
         <strong>Quick updates & key qualifications:</strong>
@@ -140,6 +156,12 @@ export function generateFollowUpEmail(outreach) {
       <p>
         I would love to set up a quick 10-15 minute introductory call this week at your convenience. I have re-attached my updated resume for quick reference.
       </p>
+
+      ${isPerson ? `
+        <p style="margin-top: 14px;">
+          If this search is managed by another recruiter or engineering hiring manager on your team, <strong>could you please forward my details to the relevant contact or consider referring me internally for this position?</strong>
+        </p>
+      ` : ''}
 
       <p>
         Thank you for your time and consideration!

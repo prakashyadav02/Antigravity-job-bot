@@ -142,6 +142,54 @@ export function cleanCompanyName(raw) {
 }
 
 /**
+ * Extracts Requisition / Job ID from URL or lead object across LinkedIn, Naukri, Workday, Lever, Greenhouse
+ */
+export function extractJobId(jobUrl, lead = {}) {
+  if (lead && lead.jobId) return String(lead.jobId).trim();
+  if (!jobUrl) return null;
+
+  try {
+    const urlObj = new URL(jobUrl);
+    for (const key of ['jobId', 'currentJobId', 'gh_jid', 'id', 'reqId', 'job_id', 'ref', 'requisitionId']) {
+      const val = urlObj.searchParams.get(key);
+      if (val && /^[a-zA-Z0-9\-_]{4,}$/.test(val)) return val;
+    }
+  } catch {}
+
+  // LinkedIn job ID: /jobs/view/(.*-)?(\d{8,12})/
+  const liMatch = jobUrl.match(/\/jobs\/view\/(?:[^\/]+-)?(\d{8,12})/i);
+  if (liMatch) return liMatch[1];
+
+  // Naukri job ID: trailing digits in job-listings (e.g. 180926016268)
+  const naukriMatch = jobUrl.match(/job-listings-.*?-(\d{8,14})(?:\?|$)/i);
+  if (naukriMatch) return naukriMatch[1];
+
+  // Workday requisition ID: (R-\d+|JR\d+|REQ-\d+) preceded by _, -, /, or word boundary
+  const reqMatch = jobUrl.match(/(?:[_\-\/]|\b)(R[-_]?\d{4,8}|JR\d{4,8}|REQ[-_]?\d{4,8})\b/i);
+  if (reqMatch) return reqMatch[1];
+
+  // General trailing path number (digits 5-14)
+  const generalNum = jobUrl.match(/\/(\d{5,14})(?:\/|\?|$)/);
+  if (generalNum) return generalNum[1];
+
+  // UUID match (e.g. Lever/Ashby)
+  const uuidMatch = jobUrl.match(/\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?:\/|\?|$)/);
+  if (uuidMatch) return uuidMatch[1];
+
+  return null;
+}
+
+/**
+ * Checks whether an email is a generic company mailbox (careers@, jobs@, hr@, etc.)
+ * versus an individual professional (Aishwarya Shetty, Ishaan Kakkar, etc.)
+ */
+export function isGenericCareerEmail(email) {
+  if (!email) return false;
+  const local = email.split('@')[0].toLowerCase().trim();
+  return /^(careers?|jobs?|recruitment|talent|hr|info|contact|apply|hiring)$/i.test(local);
+}
+
+/**
  * Normalizes company name and resolves its true web domain
  */
 export function resolveCompanyDomain(rawName) {
